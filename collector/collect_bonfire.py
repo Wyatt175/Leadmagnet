@@ -9,7 +9,7 @@ What it does, in plain English:
   2. Listens for the data the page loads behind the scenes (the full list of
      open bids). If it can't find that, it falls back to reading the table
      on screen.
-  3. Keeps only bids that look like concrete work.
+  3. Keeps only bids relevant to concrete contractors (see matching.py).
   4. Saves them to your Supabase "bids" table, skipping any it already has.
   5. Saves a screenshot, page copy, and the raw data into "debug".
 
@@ -28,26 +28,13 @@ from zoneinfo import ZoneInfo
 from dateutil import parser as dateparser
 from playwright.sync_api import sync_playwright
 
+from matching import classify
+
 PORTAL = "https://utah.bonfirehub.com"
 OPEN_URL = f"{PORTAL}/portal/?tab=openOpportunities"
 SOURCE = "bonfire_utah"
 DEBUG_DIR = "debug"
 UTAH_TZ = ZoneInfo("America/Denver")
-
-# Words that signal concrete work. Add or remove to tune what gets through.
-CONCRETE_KEYWORDS = [
-    "concrete", "cement", "flatwork", "sidewalk", "curb", "gutter",
-    "slab", "footing", "foundation", "retaining wall", "ada ramp",
-    "pedestrian ramp", "driveway", "paving", "pavement", "shotcrete",
-    "rebar", "precast", "bridge", "parking lot", "sitework", "site work",
-    "street improvement", "road improvement", "trail", "park improvement",
-]
-
-
-def is_concrete(text: str) -> bool:
-    t = (text or "").lower()
-    return any(word in t for word in CONCRETE_KEYWORDS)
-
 
 def pick(record: dict, *names):
     """Return the first non-empty field, ignoring upper/lower case differences."""
@@ -73,22 +60,22 @@ def to_iso(value, assume_tz):
     return dt.isoformat()
 
 
-def find_projects(obj):
-    """Dig through the page's background data for the list of projects."""
+def find_key(obj, wanted):
+    """Dig through the page's background data for a section by name (e.g. 'projects')."""
     if isinstance(obj, dict):
         for key, val in obj.items():
-            if str(key).lower() == "projects":
+            if str(key).lower() == wanted:
                 if isinstance(val, dict):
-                    return list(val.values())
-                if isinstance(val, list):
                     return val
+                if isinstance(val, list):
+                    return {str(i): v for i, v in enumerate(val)}
         for val in obj.values():
-            found = find_projects(val)
+            found = find_key(val, wanted)
             if found:
                 return found
     elif isinstance(obj, list):
         for val in obj:
-            found = find_projects(val)
+            found = find_key(val, wanted)
             if found:
                 return found
     return None
@@ -144,11 +131,12 @@ def scrape():
 def bids_from_data(captured):
     """Build bids from the page's background data (the preferred route)."""
     for item in captured:
-        projects = find_projects(item["data"])
+        projects = find_key(item["data"], "projects")
         if not projects:
             continue
+        departments = find_key(item["data"], "departments") or {}
         bids = []
-        for proj in projects:
+        for proj in projects.values():
             if not isinstance(proj, dict):
                 continue
             pid = pick(proj, "ProjectID", "projectId", "id")
@@ -156,14 +144,14 @@ def bids_from_data(captured):
             if not pid or not name:
                 continue
             ref = pick(proj, "ReferenceID", "referenceId", "reference")
-            agency = pick(proj, "DepartmentName", "OrganizationName", "department", "organization")
-            desc = pick(proj, "ProjectDescription", "Description", "description") or ""
+            dept = departments.get(str(pick(proj, "DepartmentID") or ""), {})
+            agency = pick(dept, "DepartmentName") if isinstance(dept, dict) else None
             title = f"{ref} {name}" if ref and str(ref) not in str(name) else str(name)
             bids.append({
                 "source_bid_id": str(pid),
                 "title": title,
                 "agency": agency or "State of Utah (Bonfire)",
-                "description": f"{desc}",
+                "description": "",
                 # Bonfire's raw data stores times in UTC
                 "close_date": to_iso(pick(proj, "DateClose", "CloseDate", "closeDate"), timezone.utc),
                 "url": f"{PORTAL}/opportunities/{pid}",
@@ -209,20 +197,25 @@ def main():
     for b in all_bids[:5]:
         print(f"  sample: {b['title']}")
 
-    concrete = {}
+    relevant = {}
     for b in all_bids:
-        if is_concrete(f"{b['title']} {b['description']} {b['agency']}"):
+        category = classify(b["title"])
+        if category:
             b["source"] = SOURCE
-            b["category"] = "concrete"
+            b["category"] = category
             b["title"] = b["title"][:500]
             b["description"] = (b["description"] or "")[:4000]
-            concrete[b["source_bid_id"]] = b
+            relevant[b["source_bid_id"]] = b
 
-    print(f"Found {len(concrete)} concrete bids")
-    for b in concrete.values():
-        print(f"  - {b['title']}  (closes {b['close_date']})")
+    direct = [b for b in relevant.values() if b["category"] == "concrete"]
+    general = [b for b in relevant.values() if b["category"] == "general_construction"]
+    print(f"Found {len(direct)} concrete bids and {len(general)} general construction bids")
+    for b in direct:
+        print(f"  [concrete] {b['title']}  ({b['agency']}, closes {b['close_date']})")
+    for b in general:
+        print(f"  [general]  {b['title']}  ({b['agency']}, closes {b['close_date']})")
 
-    if not concrete:
+    if not relevant:
         print("Nothing matched. Check debug/bonfire.png and debug/bonfire_data.json.")
         return
 
@@ -237,7 +230,7 @@ def main():
         os.environ["SUPABASE_SERVICE_ROLE_KEY"],
     )
     client.table("bids").upsert(
-        list(concrete.values()),
+        list(relevant.values()),
         on_conflict="source,source_bid_id",
         ignore_duplicates=True,
     ).execute()
