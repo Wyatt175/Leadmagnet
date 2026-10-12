@@ -1,5 +1,4 @@
-# Runs the U3P collector every 3 hours, plus a "Run workflow" button for manual runs.
-name: Collect U3P bids
+name: Collect Utah bids
 
 on:
   schedule:
@@ -24,16 +23,25 @@ jobs:
       - name: Install the hidden browser
         run: python -m playwright install --with-deps chromium
 
-      - name: Run the collector
+      - name: Run the Bonfire collector
+        run: python collector/collect_bonfire.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PYTHONUNBUFFERED: "1"
+
+      - name: Run the U3P collector
+        if: always()
         run: python collector/collect_u3p.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PYTHONUNBUFFERED: "1"
 
-      - name: Save the debug screenshot
+      - name: Save the debug files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: u3p-debug
+          name: collector-debug
           path: debug/
           retention-days: 7
