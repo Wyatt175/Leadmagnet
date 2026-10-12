@@ -5,7 +5,7 @@ What it does, in plain English:
   1. Opens the public U3P bid page in a hidden browser (the page needs
      JavaScript, so a normal download won't work).
   2. Reads every row of the bid listings.
-  3. Keeps only rows that look like concrete work.
+  3. Keeps only bids relevant to concrete contractors (see matching.py).
   4. Saves them to your Supabase "bids" table, skipping any it already has.
   5. Saves a screenshot + page copy into a "debug" folder so you can see
      exactly what it saw if something looks off.
@@ -24,18 +24,12 @@ from zoneinfo import ZoneInfo
 from dateutil import parser as dateparser
 from playwright.sync_api import sync_playwright
 
+from matching import classify
+
 U3P_URL = "https://bids.sciquest.com/apps/Router/PublicEvent?CustomerOrg=StateOfUtah"
 SOURCE = "u3p"
 DEBUG_DIR = "debug"
 UTAH_TZ = ZoneInfo("America/Denver")
-
-# Words that signal concrete work. Add or remove to tune what gets through.
-CONCRETE_KEYWORDS = [
-    "concrete", "cement", "flatwork", "sidewalk", "curb", "gutter",
-    "slab", "footing", "foundation", "retaining wall", "ada ramp",
-    "pedestrian ramp", "driveway", "paving", "pavement", "shotcrete",
-    "rebar", "precast", "bridge deck", "parking lot",
-]
 
 # Matches dates like 10/22/2026 or 10/22/2026 2:00 PM
 DATE_PATTERN = re.compile(
@@ -45,11 +39,6 @@ DATE_PATTERN = re.compile(
 
 # Tries to find a stable ID number inside a bid's link
 ID_IN_LINK = re.compile(r"(?:eventid|id|tabsheetid)=(\d+)", re.IGNORECASE)
-
-
-def is_concrete(text: str) -> bool:
-    t = text.lower()
-    return any(word in t for word in CONCRETE_KEYWORDS)
 
 
 def parse_close_date(text: str):
@@ -115,7 +104,8 @@ def main():
         title, text, href = row["title"], row["text"], row["href"]
         if not title or len(title) < 8:
             continue  # skip header rows, page numbers, etc.
-        if not is_concrete(f"{title} {text}"):
+        category = classify(title)
+        if not category:
             continue
 
         bid_id = make_bid_id(title, href)
@@ -124,13 +114,13 @@ def main():
             "source_bid_id": bid_id,
             "title": title[:500],
             "agency": "State of Utah (U3P)",
-            "category": "concrete",
+            "category": category,
             "description": text[:4000],
             "close_date": parse_close_date(text),
             "url": href or U3P_URL,
         }
 
-    print(f"Found {len(bids)} concrete bids")
+    print(f"Found {len(bids)} relevant bids")
     for b in bids.values():
         print(f"  - {b['title']}  (closes {b['close_date']})")
 
