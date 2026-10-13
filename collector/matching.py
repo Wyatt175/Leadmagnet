@@ -75,3 +75,28 @@ def classify(title: str):
     if _GENERAL.search(text) and not _OTHER_TRADE.search(text):
         return "general_construction"
     return None
+
+
+# ---------------------------------------------------------------------
+# Road projects (UDOT): almost every road job needs concrete work
+# (curb, gutter, barrier, ramps, sidewalk), so they count as general
+# construction unless they are clearly signals, signs, or striping.
+# ---------------------------------------------------------------------
+ROAD_OTHER_TRADE_PATTERNS = [
+    r"signals?", r"presignals?", r"queue cutters?", r"signing", r"signs?",
+    r"striping", r"pavement markings?", r"lighting", r"fiber(?: optics?)?",
+    r"its", r"cameras?", r"wwd", r"wrong[- ]way", r"rumble strips?",
+    r"guardrail", r"cable barrier", r"seeding", r"weed", r"mowing",
+]
+
+_ROAD_OTHER_TRADE = _compile(ROAD_OTHER_TRADE_PATTERNS)
+
+
+def classify_road_project(title: str):
+    """Return 'concrete', 'general_construction', or None for a road project title."""
+    text = title or ""
+    if _EXCLUDE.search(text) or _ROAD_OTHER_TRADE.search(text):
+        return None
+    if _CONCRETE.search(text) or re.search(r"\bsafe routes\b|\bpedestrian\b|\bada\b", text, re.IGNORECASE):
+        return "concrete"
+    return "general_construction"
