@@ -97,6 +97,9 @@ def classify_road_project(title: str):
     text = title or ""
     if _EXCLUDE.search(text) or _ROAD_OTHER_TRADE.search(text):
         return None
-    if _CONCRETE.search(text) or re.search(r"\bsafe routes\b|\bpedestrian\b|\bada\b", text, re.IGNORECASE):
+    if _CONCRETE.search(text) or re.search(
+        r"\bsafe routes\b|\bpedestrian\b|\bada\b|\bbridges?\b|\bbox culverts?\b|\bbfp\b",
+        text, re.IGNORECASE,
+    ):
         return "concrete"
     return "general_construction"
