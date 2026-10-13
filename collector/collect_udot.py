@@ -31,7 +31,9 @@ from playwright.sync_api import sync_playwright
 
 from matching import classify_road_project
 
-PROJECTS_URL = "https://contractorzone.udot.utah.gov/projects"
+SITE = "https://contractorzone.udot.utah.gov"
+PROJECTS_URL = f"{SITE}/projects"
+DEFAULT_BID_HOUR = 14  # UDOT bid openings are 2:00 PM local time when no time is given
 SOURCE = "udot"
 DEBUG_DIR = "debug"
 UTAH_TZ = ZoneInfo("America/Denver")
@@ -50,6 +52,9 @@ def to_iso(value):
         dt = dateparser.parse(text, fuzzy=True)
     except (ValueError, OverflowError):
         return None
+    has_time = bool(re.search(r"\d{1,2}:\d{2}", str(value)))
+    if not has_time and not is_iso:
+        dt = dt.replace(hour=DEFAULT_BID_HOUR, minute=0)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTAH_TZ)
     return dt.isoformat()
@@ -159,7 +164,7 @@ def bids_from_data(captured):
                 number=field(proj, "projectnumber", "projectno", "number"),
                 region=field(proj, "region"),
                 bid_open=field(proj, "bidopen", "opendate", "bidopening", "letting", "biddate"),
-                href=None,
+                href=f"{SITE}/project/{field(proj, 'recorduuid', 'uuid')}" if field(proj, "recorduuid", "uuid") else None,
             ))
         if bids:
             return bids
@@ -184,7 +189,18 @@ def main():
 
     all_bids = bids_from_data(captured)
     route = "background data"
-    if not all_bids:
+    if all_bids:
+        # The background data only has the bid date; the on-screen table also
+        # shows the time (e.g. "October 15, 2026 2:00 PM MST"). Use it when available.
+        times = {}
+        for row in rows:
+            cells = row.get("cells") or []
+            if len(cells) >= 6 and re.search(r"\d{1,2}:\d{2}", cells[5]):
+                times[cells[1].strip()] = cells[5]
+        for b in all_bids:
+            if b["source_bid_id"] in times:
+                b["close_date"] = to_iso(times[b["source_bid_id"]])
+    else:
         all_bids = bids_from_table(rows)
         route = "on-screen table"
 
