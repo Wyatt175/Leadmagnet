@@ -186,6 +186,12 @@ def main():
         print("DRY_RUN is on, so bids were not marked as emailed.")
         return
 
+    if failed and not sent:
+        # Every send failed (bad API key, Resend outage, etc.). Leave the bids
+        # unmarked so they go out on the next run once the problem is fixed.
+        print("All sends failed, so bids were NOT marked as emailed. They'll retry next run.")
+        return
+
     # Mark every new bid (open or already closed) as handled so it never repeats
     ids = [b["id"] for b in new_bids]
     stamp = now.isoformat()
