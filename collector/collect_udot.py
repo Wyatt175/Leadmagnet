@@ -10,8 +10,7 @@ What it does, in plain English:
   2. Listens for the data the page loads behind the scenes. If it can't
      find that, it reads the table on screen instead. The table columns are:
      Project Name | PIN | Project Number | Region | Advertised Date | Bid Open Date & Time
-  3. Sorts each project with the road rules in matching.py (concrete,
-     general construction, or skip for signals/signs/striping).
+  3. Tags each project with its trades using the road rules in matching.py.
   4. Saves them to your Supabase "bids" table, updating ones it already has.
   5. Saves a screenshot, page copy, and raw data into "debug".
 
@@ -29,7 +28,7 @@ from zoneinfo import ZoneInfo
 from dateutil import parser as dateparser
 from playwright.sync_api import sync_playwright
 
-from matching import classify_road_project
+from matching import classify_trades, legacy_category
 
 SITE = "https://contractorzone.udot.utah.gov"
 PROJECTS_URL = f"{SITE}/projects"
@@ -211,21 +210,18 @@ def main():
     relevant = {}
     skipped = []
     for b in all_bids:
-        category = classify_road_project(b["title"])
-        if category:
+        trades = classify_trades(b["title"], road_project=True)
+        if trades:
             b["source"] = SOURCE
-            b["category"] = category
+            b["trades"] = trades
+            b["category"] = legacy_category(trades)
             relevant[b["source_bid_id"]] = b
         else:
             skipped.append(b["title"])
 
-    direct = [b for b in relevant.values() if b["category"] == "concrete"]
-    general = [b for b in relevant.values() if b["category"] == "general_construction"]
-    print(f"Found {len(direct)} concrete bids and {len(general)} general construction bids")
-    for b in direct:
-        print(f"  [concrete] {b['title']}  ({b['agency']}, bid open {b['close_date']})")
-    for b in general:
-        print(f"  [general]  {b['title']}  ({b['agency']}, bid open {b['close_date']})")
+    print(f"Found {len(relevant)} trade bids")
+    for b in relevant.values():
+        print(f"  [{', '.join(b['trades'])}] {b['title']}  ({b['agency']}, bid open {b['close_date']})")
     for t in skipped:
         print(f"  [skipped]  {t}")
 
