@@ -22,7 +22,7 @@ CONCRETE_PATTERNS = [
     r"shotcrete", r"gunite", r"rebar", r"precast", r"skate ?parks?",
     r"canal lining", r"culverts?", r"bridge decks?", r"paving", r"pavement",
     r"parking lots?", r"plazas?", r"hardscape", r"walkways?", r"pathways?",
-    r"trails?",
+    r"trails?", r"(?:hard|tennis|pickleball|basketball|sport|sports) courts?",
 ]
 
 # General construction where a concrete sub is usually needed
