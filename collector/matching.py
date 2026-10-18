@@ -228,3 +228,84 @@ def classify_trades(title: str, road_project: bool = False):
 def legacy_category(trades):
     """Keeps the original Leadmagnet site working: 'concrete' or 'general_construction'."""
     return "concrete" if "concrete" in trades else "general_construction"
+
+
+# =====================================================================
+# PUBLIC NOTICE WEBSITE (utah.gov/pmn)
+# Notices have a generic title ("Advertisement for Bid") and a detailed
+# description, so we look at both, with extra care because descriptions
+# contain boilerplate ("in order to", "insurance", "bond").
+# =====================================================================
+
+# Does the notice look like a request for bids at all?
+_SOLICITATION = re.compile(
+    r"\b(?:bids?|bidding|bidders?|rfps?|rfqs?|rfbs?|itbs?|invitation (?:to|for) bids?|"
+    r"request(?:s)? for (?:proposals?|qualifications|bids?|quotes?|statements? of qualifications)|"
+    r"sealed (?:bids|proposals)|advertisement for bids?|notice to contractors|call for bids|"
+    r"soq|procurement)\b",
+    re.IGNORECASE,
+)
+
+# Notices that mention bids but aren't open solicitations
+_NOT_OPEN_SOLICITATION = re.compile(
+    r"\b(?:award(?:ed)?|intent to award|agenda|minutes|meeting|hearing|ordinance|resolution|"
+    r"election|budget|vacanc(?:y|ies)|employment|job opening|positions?|surplus|auction|"
+    r"sale of|lease of|bid results?|bid tabulation|canvass)\b",
+    re.IGNORECASE,
+)
+
+# Professional services and purchases, judged on the whole notice
+_NON_TRADE_DETAIL = _compile([
+    r"(?:engineering|design|consulting|consultant|legal|audit(?:ing)?|banking|financial|"
+    r"insurance|staffing|professional|accounting|actuarial|appraisal|marketing|it|"
+    r"technology|software|medical|nursing|food|catering|transportation|bus) services",
+    r"master plan", r"feasibility study", r"\bstudy\b", r"software", r"food service",
+    r"purchase of", r"supply and delivery", r"\bfuel\b", r"vehicles?", r"uniforms?",
+])
+
+
+def is_bid_notice(title: str, public_body: str, description: str) -> bool:
+    """True when a public notice is an open request for bids or proposals."""
+    head = f"{title or ''} {public_body or ''}"
+    if _NOT_OPEN_SOLICITATION.search(title or ""):
+        return False
+    return bool(_SOLICITATION.search(head) or _SOLICITATION.search((description or "")[:400]))
+
+
+def classify_notice(title: str, description: str):
+    """Trade slugs for a Public Notice bid, using its title and description."""
+    title = title or ""
+    detail = (description or "")[:1500]
+    if _NON_TRADE.search(title) or _NON_TRADE_DETAIL.search(f"{title} {detail}"):
+        return []
+    text = f"{title} {detail}"
+    trades = {slug for slug, rx in _TRADE_RES.items() if rx.search(text)}
+    if trades - {"general_construction"} and not _GENERAL.search(text):
+        trades.discard("general_construction")
+    # Street, road and site jobs are civil work even when the words are scattered
+    if re.search(r"\b(?:street|road|roadway|avenue|drive|lane|boulevard|parkway|"
+                 r"subdivision|intersection)\b", text, re.IGNORECASE) and \
+            trades & {"paving", "earthwork_utilities", "concrete"}:
+        trades.add("general_construction")
+    return sorted(trades)
+
+
+_MONEY = re.compile(
+    r"(?:engineer'?s|engineers|estimated|construction|project)\s+(?:cost\s+)?estimate[^$]{0,40}"
+    r"\$\s?([\d,]+(?:\.\d+)?)\s*(million|mil|m)?",
+    re.IGNORECASE,
+)
+
+
+def estimated_value(description: str):
+    """Pull an engineer's estimate like '$3,500,000' or '$1.2 million' out of a notice."""
+    m = _MONEY.search(description or "")
+    if not m:
+        return None
+    try:
+        value = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    if m.group(2):
+        value *= 1_000_000
+    return value if 1_000 <= value <= 5_000_000_000 else None
