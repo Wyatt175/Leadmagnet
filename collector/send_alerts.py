@@ -6,7 +6,8 @@ What it does, in plain English:
   2. Gets the list of contractors who want email alerts (profiles.notify_by is
      'email' or 'both'), using the alert_recipients() database function.
   3. Sends each one a single email listing the new bids that match their
-     alert setting ('all' or 'concrete' only), concrete jobs first.
+     trades (profiles.trades). Contractors who haven't picked trades yet fall
+     back to the older setting: 'all' or 'concrete' only.
   4. Marks those bids as emailed so nobody gets them twice.
 
 Settings come from environment variables (GitHub Actions supplies them):
@@ -26,6 +27,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 from supabase import create_client
+
+from matching import TRADE_LABELS
 
 UTAH_TZ = ZoneInfo("America/Denver")
 RESEND_URL = "https://api.resend.com/emails"
@@ -59,9 +62,10 @@ def days_left(value, now):
 
 
 def bid_row(bid, now):
-    is_concrete = bid["category"] == "concrete"
+    trades = bid.get("trades") or [bid.get("category") or "general_construction"]
+    is_concrete = "concrete" in trades
     badge_color = ORANGE if is_concrete else "#64748B"
-    badge_text = "CONCRETE" if is_concrete else "GENERAL CONSTRUCTION"
+    badge_text = " · ".join(TRADE_LABELS.get(t, t) for t in trades[:3]).upper()
     title = html.escape(bid["title"] or "")
     agency = html.escape(bid["agency"] or "")
     url = html.escape(bid["url"] or "#")
@@ -83,14 +87,8 @@ def bid_row(bid, now):
 
 
 def build_email(bids, now, app_url):
-    concrete = [b for b in bids if b["category"] == "concrete"]
-    n, c = len(bids), len(concrete)
-    if c and c == n:
-        subject = f"{c} new concrete bid{'s' if c != 1 else ''} in Utah"
-    elif c:
-        subject = f"{c} new concrete bid{'s' if c != 1 else ''} + {n - c} more in Utah"
-    else:
-        subject = f"{n} new Utah construction bid{'s' if n != 1 else ''}"
+    n = len(bids)
+    subject = f"{n} new Utah bid{'s' if n != 1 else ''} for your trades"
 
     rows = "".join(bid_row(b, now) for b in bids)
     feed_link = (
@@ -145,7 +143,7 @@ def main():
 
     new_bids = (
         client.table("bids")
-        .select("id,title,agency,category,close_date,url")
+        .select("id,title,agency,category,trades,close_date,url")
         .is_("alerted_at", "null")
         .execute()
         .data
@@ -163,8 +161,12 @@ def main():
 
     sent = failed = 0
     for person in recipients:
-        scope = person.get("alert_scope") or "all"
-        mine = [b for b in open_bids if scope == "all" or b["category"] == "concrete"]
+        wanted = set(person.get("trades") or [])
+        if wanted:
+            mine = [b for b in open_bids if wanted & set(b.get("trades") or [b["category"]])]
+        else:
+            scope = person.get("alert_scope") or "all"
+            mine = [b for b in open_bids if scope == "all" or b["category"] == "concrete"]
         if not mine:
             continue
         subject, body = build_email(mine, now, app_url)
