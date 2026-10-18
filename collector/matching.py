@@ -163,7 +163,7 @@ TRADE_PATTERNS = {
         r"wwd", r"wrong[- ]way",
     ],
     "landscaping": [
-        r"landscap(?:e|ing)", r"irrigation", r"trees?", r"mowing", r"turf", r"sod", r"weed",
+        r"landscap(?:e|ing)", r"irrigation(?! (?:company|district|canal|association))", r"trees?", r"mowing", r"turf", r"sod", r"weed",
         r"snow removal", r"grounds maintenance", r"seeding",
     ],
     "janitorial": [r"janitorial", r"custodial", r"cleaning"],
@@ -190,6 +190,8 @@ NON_TRADE_PATTERNS = [
     r"printing", r"banking", r"actuarial", r"special inspection", r"inspection services?",
     r"testing services?", r"technology upgrades?", r"\bpcs?\b", r"exercise equipment",
     r"master developer", r"for-sale homes", r"inventory order", r"\border\b",
+    r"manager services", r"management services", r"administration services",
+    r"administrative services", r"operator services", r"concessions?", r"rodeo",
 ]
 
 _TRADE_RES = {slug: _compile(pats) for slug, pats in TRADE_PATTERNS.items()}
