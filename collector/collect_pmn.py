@@ -51,13 +51,16 @@ PAUSE = 0.25                  # seconds between requests, to be polite to the st
 HEADERS = {"User-Agent": "BidSlateBot/1.0 (public bid aggregator for Utah contractors)"}
 
 LABELS = [
-    "Notice Title", "Entity", "Public Body", "Government Type", "Notice Type",
-    "Posted On", "Event Start", "Event End", "Deadline", "Description",
-    "Notice Date & Time", "Attachments", "Contact", "Contact Information",
-    "Special Accommodations", "Electronic Participation", "Location", "Notice Location",
-    "Audio File", "Last Edited", "Notice Tags",
+    "Notice Title", "Entity", "Public Body", "Government Type", "Notice Type", "Notice Type(s)",
+    "Posted On", "Notice Posted On", "Notice Last Edited On",
+    "Event Start", "Event Start Date & Time", "Event End", "Event End Date & Time",
+    "Deadline", "Deadline Date & Time", "Description", "Description/Agenda",
+    "Notice of Special Accommodations (ADA)", "Notice of Electronic or Telephone Participation",
+    "Meeting Information", "Meeting Location", "Contact Name", "Contact Email", "Contact Phone",
+    "Notice Posting Details", "Download Attachments", "Attachments", "Board/Committee Contacts",
+    "Subscribe", "Definitions", "Add Notice to Calendar", "Notice Information", "General Information",
 ]
-STOP_LABELS = set(LABELS) - {"Description"}
+STOP_LABELS = set(LABELS) - {"Description", "Description/Agenda"}
 
 # Turn the state's government types into the group prefixes the website understands
 GROUPS = [
@@ -117,7 +120,7 @@ def description(lines):
                     break
                 parts.append(nxt)
             return " ".join(parts)[:4000]
-        if line.rstrip(":") == "Description":
+        if line.rstrip(":") in ("Description", "Description/Agenda"):
             parts = []
             for nxt in lines[i + 1:]:
                 if nxt.rstrip(":") in STOP_LABELS:
@@ -146,18 +149,55 @@ def agency_label(entity, gov_type):
     return entity or "Utah public notice"
 
 
+def first_field(lines, *labels):
+    for label in labels:
+        value = field(lines, label)
+        if value:
+            return value
+    return ""
+
+
+_MONTHS = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|" \
+          r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?"
+_DUE_IN_TEXT = re.compile(
+    r"(?:until|by|no later than|before|prior to|due|deadline|opened|opening|received)[^.;]{0,90}?"
+    r"(" + _MONTHS + r"\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}|\d{1,2}/\d{1,2}/\d{2,4})"
+    r"(?:[^.;]{0,30}?(\d{1,2}(?::\d{2})?\s*[ap]\.?\s*m\.?))?",
+    re.IGNORECASE,
+)
+_TIME_BEFORE = re.compile(r"(\d{1,2}(?::\d{2})?\s*[ap]\.?\s*m\.?)[^.;]{0,40}$", re.IGNORECASE)
+
+
+def deadline_from_text(text):
+    """Find a due date written in the description, like 'until 10:00 a.m. on June 30, 2026'."""
+    text = re.sub(r"\b([ap])\.\s?m\.", r"\1m", text or "", flags=re.IGNORECASE)
+    m = _DUE_IN_TEXT.search(text)
+    if not m:
+        return ""
+    date = m.group(1)
+    clock = m.group(2)
+    if not clock:
+        before = _TIME_BEFORE.search(text[max(0, m.start(1) - 60):m.start(1)])
+        clock = before.group(1) if before else "5:00 pm"
+    return f"{date} {clock.replace('.', '')}"
+
+
 def parse(notice_id, html):
     lines = page_lines(html)
-    title = field(lines, "Notice Title")
-    entity = field(lines, "Entity")
-    body = field(lines, "Public Body")
-    gov_type = field(lines, "Government Type")
     desc = description(lines)
-    deadline = field(lines, "Deadline") or field(lines, "Event End")
+    deadline = (first_field(lines, "Deadline Date & Time", "Deadline")
+                or deadline_from_text(desc)
+                or first_field(lines, "Event End Date & Time", "Event End"))
     return {
-        "id": notice_id, "title": title, "entity": entity, "public_body": body,
-        "gov_type": gov_type, "description": desc, "deadline": deadline,
-        "posted": field(lines, "Posted On"),
+        "id": notice_id,
+        "title": first_field(lines, "Notice Title"),
+        "entity": first_field(lines, "Entity"),
+        "public_body": first_field(lines, "Public Body"),
+        "gov_type": first_field(lines, "Government Type"),
+        "notice_type": first_field(lines, "Notice Type(s)", "Notice Type"),
+        "description": desc,
+        "deadline": deadline,
+        "posted": first_field(lines, "Notice Posted On", "Posted On"),
     }
 
 
@@ -229,7 +269,7 @@ def main():
             saved_debug += 1
 
         n = parse(notice_id, html)
-        if not n["title"]:
+        if not n["title"] or re.search(r"\bmeeting\b", n["notice_type"], re.IGNORECASE):
             continue
         if not is_bid_notice(n["title"], n["public_body"], n["description"]):
             continue
