@@ -14,7 +14,7 @@ Settings come from environment variables (GitHub Actions supplies them):
   SUPABASE_URL               your project URL
   SUPABASE_SERVICE_ROLE_KEY  your SECRET service key
   RESEND_API_KEY             your Resend API key (secret)
-  ALERT_FROM_EMAIL           who the email is from, e.g. "Leadmagnet <onboarding@resend.dev>"
+  ALERT_FROM_EMAIL           who the email is from, e.g. "BidSlate <onboarding@resend.dev>"
   APP_URL                    optional: your published site, e.g. https://leadmagnet.lovable.app
   DRY_RUN=1                  optional: print the emails instead of sending, and don't mark anything
 """
@@ -32,7 +32,7 @@ from matching import TRADE_LABELS
 
 UTAH_TZ = ZoneInfo("America/Denver")
 RESEND_URL = "https://api.resend.com/emails"
-ORANGE = "#F97316"
+ORANGE = "#0E5A43"  # BidSlate forest green
 
 
 def parse_ts(value):
@@ -61,6 +61,15 @@ def days_left(value, now):
     return f"closes in {int(days)} days"
 
 
+def estimate_html(bid):
+    value = bid.get("estimated_value")
+    if not value:
+        return ""
+    value = float(value)
+    text = f"${value / 1_000_000:.1f}M" if value >= 1_000_000 else f"${value:,.0f}"
+    return f" &middot; Est. {text}"
+
+
 def bid_row(bid, now):
     trades = bid.get("trades") or [bid.get("category") or "general_construction"]
     is_concrete = "concrete" in trades
@@ -77,7 +86,7 @@ def bid_row(bid, now):
       </div>
       <div style="font-size:13px;color:#6B7280;">{agency}</div>
       <div style="font-size:13px;color:#374151;margin-top:6px;">
-        Due {html.escape(fmt_close(bid["close_date"]))} &middot; <b>{days_left(bid["close_date"], now)}</b>
+        Due {html.escape(fmt_close(bid["close_date"]))} &middot; <b>{days_left(bid["close_date"], now)}</b>{estimate_html(bid)}
       </div>
       <div style="margin-top:10px;">
         <a href="{url}" style="display:inline-block;background:{ORANGE};color:#fff;font-size:13px;font-weight:700;
@@ -103,13 +112,13 @@ def build_email(bids, now, app_url):
     body = f"""
     <div style="background:#F3F4F6;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
       <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:10px;padding:28px;">
-        <div style="font-size:20px;font-weight:800;color:#111827;">LEAD<span style="color:{ORANGE};">MAGNET</span></div>
+        <div style="font-size:20px;font-weight:800;color:#111827;">Bid<span style="color:{ORANGE};">Slate</span></div>
         <h1 style="font-size:20px;color:#111827;margin:18px 0 4px;">{html.escape(subject)}</h1>
         <p style="font-size:14px;color:#6B7280;margin:0 0 8px;">Found on Utah public bid portals since your last alert.</p>
         <table width="100%" cellpadding="0" cellspacing="0">{rows}</table>
         {feed_link}
         <p style="font-size:12px;color:#9CA3AF;margin-top:28px;">
-          You're getting this because email alerts are on for your Leadmagnet account.
+          You're getting this because email alerts are on for your BidSlate account.
           To change what you get or turn alerts off, update your {settings}.
         </p>
       </div>
@@ -143,12 +152,14 @@ def main():
 
     new_bids = (
         client.table("bids")
-        .select("id,title,agency,category,trades,close_date,url")
+        .select("id,title,agency,category,trades,close_date,url,estimated_value,duplicate_of")
         .is_("alerted_at", "null")
         .execute()
         .data
     )
-    open_bids = [b for b in new_bids if not parse_ts(b["close_date"]) or parse_ts(b["close_date"]) > now]
+    open_bids = [b for b in new_bids
+                 if b.get("duplicate_of") is None
+                 and (not parse_ts(b["close_date"]) or parse_ts(b["close_date"]) > now)]
     open_bids.sort(key=lambda b: (b["category"] != "concrete", b["close_date"] or "9999"))
     print(f"{len(new_bids)} bids not yet emailed, {len(open_bids)} still open")
 
