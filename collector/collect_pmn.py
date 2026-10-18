@@ -182,6 +182,19 @@ def deadline_from_text(text):
     return f"{date} {clock.replace('.', '')}"
 
 
+def first_sentence(text, limit=180):
+    """First sentence of a description, without stopping at abbreviations like 'P.O.' or 'No.'."""
+    text = re.sub(r"\s+", " ", text or "").strip()
+    for m in re.finditer(r"[.!?]\s+(?=[A-Z])", text):
+        before = re.search(r"(\S+)$", text[:m.start()])
+        word = before.group(1) if before else ""
+        if len(word.replace(".", "")) <= 3 or re.fullmatch(r"(?:[A-Z]\.)+[A-Z]?", word + "."):
+            continue  # an abbreviation, keep going
+        text = text[:m.start()]
+        break
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "..."
+
+
 def parse(notice_id, html):
     lines = page_lines(html)
     desc = description(lines)
@@ -281,7 +294,7 @@ def main():
         # Generic titles like "Advertisement for Bid" get the first sentence of the description
         if re.fullmatch(r"(?i)\s*(advertisement|invitation|notice|request|call)\s.*(bids?|proposals?)\s*", title) \
                 and n["description"]:
-            title = f"{n['entity']}: {n['description'].split('. ')[0][:180]}"
+            title = f"{n['entity']}: {first_sentence(n['description'])}"
         bids[str(notice_id)] = {
             "source": SOURCE,
             "source_bid_id": str(notice_id),
