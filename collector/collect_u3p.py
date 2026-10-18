@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 from dateutil import parser as dateparser
 from playwright.sync_api import sync_playwright
 
-from matching import classify
+from matching import classify_trades, legacy_category
 
 U3P_URL = "https://bids.sciquest.com/apps/Router/PublicEvent?CustomerOrg=StateOfUtah"
 SOURCE = "u3p"
@@ -104,8 +104,8 @@ def main():
         title, text, href = row["title"], row["text"], row["href"]
         if not title or len(title) < 8:
             continue  # skip header rows, page numbers, etc.
-        category = classify(title)
-        if not category:
+        trades = classify_trades(title)
+        if not trades:
             continue
 
         bid_id = make_bid_id(title, href)
@@ -114,7 +114,8 @@ def main():
             "source_bid_id": bid_id,
             "title": title[:500],
             "agency": "State of Utah (U3P)",
-            "category": category,
+            "trades": trades,
+            "category": legacy_category(trades),
             "description": text[:4000],
             "close_date": parse_close_date(text),
             "url": href or U3P_URL,
