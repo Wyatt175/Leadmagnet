@@ -9,7 +9,7 @@ What it does, in plain English:
   2. Listens for the data the page loads behind the scenes (the full list of
      open bids). If it can't find that, it falls back to reading the table
      on screen.
-  3. Keeps only bids relevant to concrete contractors (see matching.py).
+  3. Tags each bid with its trades and skips non-trade bids (see matching.py).
   4. Saves them to your Supabase "bids" table, skipping any it already has.
   5. Saves a screenshot, page copy, and the raw data into "debug".
 
@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 from dateutil import parser as dateparser
 from playwright.sync_api import sync_playwright
 
-from matching import classify
+from matching import classify_trades, legacy_category
 
 PORTAL = "https://utah.bonfirehub.com"
 OPEN_URL = f"{PORTAL}/portal/?tab=openOpportunities"
@@ -199,21 +199,18 @@ def main():
 
     relevant = {}
     for b in all_bids:
-        category = classify(b["title"])
-        if category:
+        trades = classify_trades(b["title"])
+        if trades:
             b["source"] = SOURCE
-            b["category"] = category
+            b["trades"] = trades
+            b["category"] = legacy_category(trades)
             b["title"] = b["title"][:500]
             b["description"] = (b["description"] or "")[:4000]
             relevant[b["source_bid_id"]] = b
 
-    direct = [b for b in relevant.values() if b["category"] == "concrete"]
-    general = [b for b in relevant.values() if b["category"] == "general_construction"]
-    print(f"Found {len(direct)} concrete bids and {len(general)} general construction bids")
-    for b in direct:
-        print(f"  [concrete] {b['title']}  ({b['agency']}, closes {b['close_date']})")
-    for b in general:
-        print(f"  [general]  {b['title']}  ({b['agency']}, closes {b['close_date']})")
+    print(f"Found {len(relevant)} trade bids")
+    for b in relevant.values():
+        print(f"  [{', '.join(b['trades'])}] {b['title']}  ({b['agency']}, closes {b['close_date']})")
 
     if not relevant:
         print("Nothing matched. Check debug/bonfire.png and debug/bonfire_data.json.")
